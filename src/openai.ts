@@ -117,7 +117,7 @@ export function applyPayloadPatch(params: {
 }): JsonRecord {
   const nextPayload: JsonRecord = { ...params.payload };
 
-  if (supportsStore(params.model)) {
+  if (params.cfg.usePreviousResponseId && supportsStore(params.model)) {
     nextPayload.store = true;
   }
 
@@ -156,9 +156,17 @@ export function applyRemoteHistoryPayloadPatch(params: {
   payload: JsonRecord;
   explicitHistory: unknown[];
 }): JsonRecord {
+  // Pi 1.x carries prompt updates and dynamic tool declarations in input.
+  // Replacing conversation history must retain this current request metadata.
+  const metadata = Array.isArray(params.payload.input)
+    ? params.payload.input.filter((item) => isRecord(item) && (
+        item.role === "system" || item.role === "developer" ||
+        ((item.type === "tool_search_call" || item.type === "tool_search_output") && item.execution === "client")
+      ))
+    : [];
   const nextPayload: JsonRecord = {
     ...params.payload,
-    input: params.explicitHistory,
+    input: [...metadata, ...params.explicitHistory],
   };
   delete nextPayload.messages;
   delete nextPayload.previous_response_id;

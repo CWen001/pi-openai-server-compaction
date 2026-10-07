@@ -4,7 +4,7 @@
  * Wires together request patching, remote compaction, runtime state
  * reconstruction, session lifecycle cleanup, and provider override registration.
  */
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { buildSessionContext, convertToLlm, type ExtensionAPI, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { isRecord, loadConfig } from "./config.ts";
 import { streamOpenAIResponsesWithPhase2B } from "./custom-stream.ts";
@@ -68,10 +68,10 @@ function getSessionId(ctx: SessionContextLike): string {
   return ctx.sessionManager.getSessionId();
 }
 
-function getBranchMessages(branchEntries: BranchEntry[]): AgentMessage[] {
-  return branchEntries.flatMap((entry) =>
-    entry.type === "message" && entry.message ? [entry.message as AgentMessage] : [],
-  );
+export function getBranchMessages(branchEntries: SessionEntry[]): AgentMessage[] {
+  // Honor existing text compactions and context edits, including first install
+  // into a long-running session. Replaying the raw log can exceed the window.
+  return convertToLlm(buildSessionContext(branchEntries).messages);
 }
 
 function getBranchMessageCount(branchEntries: BranchEntry[]): number {
@@ -209,7 +209,7 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
 
     const tools = buildToolsPayload(pi.getAllTools(), pi.getActiveTools());
     const sessionId = getSessionId(ctx);
-    const branchEntries = event.branchEntries as BranchEntry[];
+    const branchEntries = event.branchEntries;
     const remoteState = getMatchingRemoteState(sessionId, model);
     const observedRequestShape = getResponsesRequestShapeState(sessionId);
     const fullBranchMessages = getBranchMessages(branchEntries);
@@ -362,7 +362,8 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
       previousResponseId,
     });
 
-    const features = ["store=true", "context_management"];
+    const features = ["context_management"];
+    if (payload.store === true) features.push("store=true");
     if (remoteState !== undefined) {
       features.push("remote_compaction_history");
     } else if (previousResponseId) {

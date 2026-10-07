@@ -19,7 +19,7 @@ import {
   serializeConversation,
   type CompactionResult,
 } from "@earendil-works/pi-coding-agent";
-import { calculateCost, type Model, type Usage } from "@earendil-works/pi-ai";
+import { calculateCost, type Model, type ProviderHeaders, type Usage } from "@earendil-works/pi-ai";
 import { complete } from "@earendil-works/pi-ai/compat";
 import { isRecord } from "./config.ts";
 import {
@@ -217,30 +217,29 @@ function withRemoteCompactionV2Feature(headers: Record<string, string>): Record<
 export function buildRemoteCompactionHeaders(params: {
   model: Model<any>;
   apiKey: string;
-  headers?: Record<string, string>;
+  headers?: ProviderHeaders;
   sessionId?: string;
 }): Record<string, string> {
   const codexIdentityHeaders = buildCodexIdentityHeaders(params.sessionId);
-  const commonHeaders = withRemoteCompactionV2Feature({
+  const commonHeaders = new Headers({
     authorization: `Bearer ${params.apiKey}`,
     ...codexIdentityHeaders,
-    ...(params.headers ?? {}),
     accept: "text/event-stream",
     "content-type": "application/json",
   });
-  if (isDirectOpenAIResponsesModel(params.model)) {
-    return commonHeaders;
-  }
   if (isOpenAICodexResponsesModel(params.model)) {
-    return {
-      ...commonHeaders,
-      "chatgpt-account-id": extractCodexAccountId(params.apiKey),
-      originator: "pi",
-      "user-agent": `pi-openai-server-compaction (${platform()} ${release()}; ${arch()})`,
-      "OpenAI-Beta": "responses=experimental",
-    };
+    commonHeaders.set("chatgpt-account-id", extractCodexAccountId(params.apiKey));
+    commonHeaders.set("originator", "pi");
+    commonHeaders.set("user-agent", `pi-openai-server-compaction (${platform()} ${release()}; ${arch()})`);
+    commonHeaders.set("OpenAI-Beta", "responses=experimental");
+  } else if (!isDirectOpenAIResponsesModel(params.model)) {
+    throw new Error("Remote compaction v2 headers are not supported for this model.");
   }
-  throw new Error("Remote compaction v2 headers are not supported for this model.");
+  for (const [name, value] of Object.entries(params.headers ?? {})) {
+    if (value === null) commonHeaders.delete(name);
+    else commonHeaders.set(name, value);
+  }
+  return withRemoteCompactionV2Feature(Object.fromEntries(commonHeaders));
 }
 
 function isAssistantPhase(value: unknown): value is AssistantPhase {
@@ -681,7 +680,7 @@ export async function generatePortableSummary(params: {
   messages: AgentMessage[];
   model: Model<any>;
   apiKey: string;
-  headers?: Record<string, string>;
+  headers?: ProviderHeaders;
   customInstructions?: string;
   signal?: AbortSignal;
   firstKeptEntryId: string;
@@ -725,7 +724,7 @@ export async function generateBestEffortLocalSummary(params: {
   messages: AgentMessage[];
   model: Model<any>;
   apiKey: string;
-  headers?: Record<string, string>;
+  headers?: ProviderHeaders;
   customInstructions?: string;
   signal?: AbortSignal;
   thinkingLevel?: ThinkingLevel;
@@ -739,7 +738,9 @@ export async function generateBestEffortLocalSummary(params: {
       params.preparation,
       params.model,
       params.apiKey,
-      params.headers,
+      // Pi 1.0.4's helper type is narrower than its provider implementation.
+      // Preserve null header-deletion markers through the compatibility boundary.
+      params.headers as Record<string, string> | undefined,
       params.customInstructions,
       params.signal,
       params.thinkingLevel,
@@ -919,7 +920,7 @@ export function parseRemoteCompactionV2Events(events: unknown[]): RemoteCompacti
 export async function callRemoteCompactionEndpoint(params: {
   model: Model<any>;
   apiKey: string;
-  headers?: Record<string, string>;
+  headers?: ProviderHeaders;
   sessionId?: string;
   input: ResponseItem[];
   instructions?: string;
@@ -1023,7 +1024,7 @@ function assistantMessageMatchesModelKey(
 ): boolean {
   const target = parseModelKeyParts(targetModelKey);
   if (!target) return false;
-  if (!isRecord(message)) return false;
+  if (message.role !== "assistant") return false;
   return message.provider === target.provider && message.model === target.id;
 }
 

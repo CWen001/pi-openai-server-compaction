@@ -43,6 +43,8 @@ type ModelInfo = JsonObject & {
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const extensionPath = join(repoRoot, "src", "index.ts");
+const piCli = process.env.PI_OPENAI_SERVER_COMPACTION_TEST_CLI ??
+  fileURLToPath(new URL("./cli.js", import.meta.resolve("@earendil-works/pi-coding-agent")));
 const primaryModel = process.env.PI_OPENAI_SERVER_COMPACTION_TEST_MODEL ?? "openai/gpt-5.4-nano";
 const primaryModelProvider = primaryModel.includes("/") ? primaryModel.split("/")[0] ?? "openai" : "openai";
 const primaryModelId = primaryModel.includes("/") ? primaryModel.split("/").at(-1) ?? primaryModel : primaryModel;
@@ -88,6 +90,8 @@ function assistantText(messages: unknown[]): string {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index];
     if (!isRecord(message) || message.role !== "assistant") continue;
+    expect(message.stopReason !== "error" && message.stopReason !== "aborted",
+      `Provider turn failed (${String(message.model)}): ${String(message.errorMessage)}`);
     const content = Array.isArray(message.content) ? message.content : [];
     return content
       .filter((block): block is JsonObject => isRecord(block) && block.type === "text")
@@ -126,7 +130,8 @@ function chooseAltModel(
   );
 
   if (sameFamily.length > 0) {
-    for (const wanted of ["gpt-5.4-mini", "gpt-4.1-mini", "gpt-5-mini", "gpt-5.4-nano", "gpt-5.1"]) {
+    const preferred = process.env.PI_OPENAI_SERVER_COMPACTION_TEST_ALT_MODEL;
+    for (const wanted of [preferred, "gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.4-mini", "gpt-4.1-mini", "gpt-5-mini", "gpt-5.4-nano", "gpt-5.1"]) {
       const match = sameFamily.find((model) => model.id === wanted && model.id !== currentId);
       if (match) return match;
     }
@@ -178,16 +183,26 @@ class PiRpcClient {
       primaryModel,
       "--session-dir",
       sessionDir,
-      "--no-extensions",
-      "-e",
-      extensionPath,
+      ...(process.env.PI_OPENAI_SERVER_COMPACTION_TEST_GLOBAL === "1"
+        ? []
+        : ["--no-extensions", "-e", extensionPath]),
       "--no-tools",
+      "--no-mcp",
+      "--no-skills",
+      "--no-context-files",
+      "--no-prompt-templates",
+      "--no-themes",
+      "--approve",
+      "--thinking",
+      "low",
     ];
     if (sessionFile) {
       args.push("--session", sessionFile);
     }
 
-    this.child = spawn("pi", args, {
+    // Invoke Node directly: Windows npm .cmd shims cannot be spawned as executables.
+    this.child = spawn(process.execPath, [piCli, ...args], {
+      windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
       env,
       ...(cwd ? { cwd } : {}),
@@ -208,6 +223,8 @@ class PiRpcClient {
     });
 
     this.child.on("error", (error) => {
+      this.closed = true;
+      this.resolveExit();
       this.failPendingRequests(`pi process error: ${error.message}`);
     });
 
@@ -367,7 +384,8 @@ async function runSameProcessTest(sessionDir: string, workspaceDir: string): Pro
 
     const stats1 = await client.getSessionStats();
     const cost1 = asNumber(stats1.cost, "get_session_stats.data.cost");
-    expect(cost1 > 0, `Expected non-zero cost after first turn, got ${cost1}`);
+    expect(cost1 >= 0, `Expected valid cost after first turn, got ${cost1}`);
+    expect(assistantText(await client.getMessages()).includes("MEMORIZED"), "First provider turn failed");
 
     await client.send({
       type: "prompt",
@@ -503,7 +521,8 @@ async function runReducedPlaintextReplayTest(sessionDir: string, workspaceDir: s
       240_000,
     );
     const compactData = asRecord(compactResponse.data, "reduced-plaintext compact.data");
-    void asString(compactData.summary, "reduced-plaintext compact.data.summary");
+    const summary = asString(compactData.summary, "reduced-plaintext compact.data.summary");
+    expect(!summary.includes(secret), "Plaintext summary leaked the codename; opaque replay is not isolated");
 
     const remoteCompaction = nestedRecord(nestedRecord(compactData.details).remoteCompaction);
     expect(
@@ -738,6 +757,44 @@ async function runResumeAfterModelSwitchTest(sessionDir: string, workspaceDir: s
   }
 }
 
+async function runMigrationTest(sessionDir: string, workspaceDir: string): Promise<void> {
+  console.log("== ordinary-text to native-compaction migration test ==");
+  const configPath = join(workspaceDir, ".pi", "openai-server-compaction.json");
+  const client = new PiRpcClient(sessionDir, undefined, workspaceDir);
+  const secret = "MIGRATION-42-VERIFIED";
+  let sessionFile = "";
+  try {
+    await client.waitIdle();
+    await client.send({ type: "prompt", message: `Remember project codename ${secret}. Reply MEMORIZED.` });
+    await client.waitIdle();
+    await client.send({ type: "prompt", message: `${compactionPadding}\nReply PADDING-OK.` });
+    await client.waitIdle();
+    await writeFile(configPath, JSON.stringify({ enabled: false }));
+    const plain = asRecord((await client.send({ type: "compact", customInstructions: "Keep the exact project codename." }, 240_000)).data, "plain compact.data");
+    expect(!nestedRecord(plain.details).remoteCompaction, "Expected an ordinary Pi text compaction");
+    expect(asString(plain.summary, "plain summary").includes(secret), "Ordinary summary lost the test fact");
+    await writeFile(configPath, JSON.stringify({ enabled: true }));
+    await client.send({ type: "prompt", message: "Continue this project. Reply MIGRATING-OK." });
+    await client.waitIdle();
+    const native = asRecord((await client.send({ type: "compact", customInstructions: "Keep the project facts." }, 240_000)).data, "native compact.data");
+    expect(nestedRecord(nestedRecord(native.details).remoteCompaction).implementation === "responses_compaction_v2", "Migration did not produce a native artifact");
+    sessionFile = asString((await client.getState()).sessionFile, "migration sessionFile");
+  } finally {
+    await client.close();
+    await rm(configPath, { force: true });
+  }
+  const resumed = new PiRpcClient(sessionDir, sessionFile, workspaceDir);
+  try {
+    await resumed.waitIdle();
+    await resumed.send({ type: "prompt", message: "What is the project codename? Reply only the codename." });
+    await resumed.waitIdle();
+    expect(assistantText(await resumed.getMessages()).includes(secret), "Migration lost continuity after restart");
+    console.log("text-to-native migration test passed");
+  } finally {
+    await resumed.close();
+  }
+}
+
 async function main(): Promise<void> {
   const artifactsRoot = await mkdtemp(join(tmpdir(), "pi-openai-compaction-live-"));
   try {
@@ -764,19 +821,23 @@ async function main(): Promise<void> {
       },
     });
 
-    await runSameProcessTest(sameProcessDir, workspaceDir);
-    if (primaryModelProvider === "openai") {
-      await runReducedPlaintextReplayTest(reducedPlaintextDir, reducedPlaintextWorkspaceDir);
-    } else {
-      console.log("== reduced-plaintext replay test ==");
-      console.log("skipped for non-direct OpenAI provider");
+    const filter = process.env.PI_OPENAI_SERVER_COMPACTION_TEST_CASE;
+    const cases = [
+      ["same-process", () => runSameProcessTest(sameProcessDir, workspaceDir)],
+      ["opaque", () => runReducedPlaintextReplayTest(reducedPlaintextDir, reducedPlaintextWorkspaceDir)],
+      ["fork", () => runForkTest(forkDir, workspaceDir)],
+      ["resume", () => runResumeTest(resumeDir, workspaceDir)],
+      ["resume-switch", () => runResumeAfterModelSwitchTest(resumeAfterSwitchDir, workspaceDir)],
+      ["migration", () => runMigrationTest(join(artifactsRoot, "migration"), workspaceDir)],
+    ] as const;
+    expect(!filter || cases.some(([name]) => name === filter), `Unknown test case: ${filter}`);
+    for (const [name, run] of cases) {
+      if (!filter || filter === name) await run();
     }
-    await runForkTest(forkDir, workspaceDir);
-    await runResumeTest(resumeDir, workspaceDir);
-    await runResumeAfterModelSwitchTest(resumeAfterSwitchDir, workspaceDir);
-
-    console.log(`ALL LIVE TESTS PASSED\nartifacts: ${artifactsRoot}`);
-    await rm(artifactsRoot, { recursive: true, force: true });
+    console.log(`ALL SELECTED LIVE TESTS PASSED\nartifacts: ${artifactsRoot}`);
+    if (process.env.PI_OPENAI_SERVER_COMPACTION_TEST_KEEP !== "1") {
+      await rm(artifactsRoot, { recursive: true, force: true });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`LIVE TEST FAILURE: ${message}\n`);

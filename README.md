@@ -1,5 +1,13 @@
 # pi-openai-server-compaction
 
+Maintained fork: [CWen001/pi-openai-server-compaction](https://github.com/CWen001/pi-openai-server-compaction), based on [algal's extension](https://github.com/algal/pi-openai-server-compaction).
+
+## Pi 1.x compatibility
+
+Version 0.2.0 targets Pi **1.0.4**. The Codex subscription path has been live-tested on Windows with `openai-codex/gpt-6-astra`, including opaque-only recall, same-process continuation, fork, resume, a model round trip through `gpt-6.1-sol`, and migration from an existing ordinary text compaction. See [VALIDATION.md](VALIDATION.md). The direct API and Azure paths have not been live-revalidated on Pi 1.x; the older evidence below belongs to upstream's Pi 0.80.9 runs.
+
+This fork preserves Pi 1.x transcript system updates and dynamic tool declarations during native-history replay. First-time compaction uses Pi's effective context projection, honoring previous text compactions instead of resending the entire raw log. Host packages are peer dependencies; development checks are pinned to the validated Pi release.
+
 This is a Pi extension which adds **Codex-style remote compaction** for OpenAI models, giving you better continuity across compaction boundaries while preserving all of Pi's normal features.
 
 What does that mean? Why would you want it? My impression has been that Codex compacts better than Claude Code and better than Pi. And I supposed this was because Codex compacts by using OpenAI's server-side Responses compaction protocol. That protocol sends a `compaction_trigger` through `POST /v1/responses` and receives an encrypted `compaction` item. This extension configures Pi to use that protocol for OpenAI models alongside Pi's native compaction logic.
@@ -55,19 +63,19 @@ https://x.com/alexisgallagher/status/2042396986327060736?s=20 .)
 Project-local (recommended):
 
 ```bash
-pi install -l git:github.com/algal/pi-openai-server-compaction
+pi install -l git:github.com/CWen001/pi-openai-server-compaction
 ```
 
 Global:
 
 ```bash
-pi install git:github.com/algal/pi-openai-server-compaction
+pi install git:github.com/CWen001/pi-openai-server-compaction
 ```
 
 One-shot, non-persistent:
 
 ```bash
-git clone https://github.com/algal/pi-openai-server-compaction.git
+git clone https://github.com/CWen001/pi-openai-server-compaction.git
 cd pi-openai-server-compaction && npm install
 pi -e ./src/index.ts --model openai/gpt-5.6-luna
 ```
@@ -75,7 +83,7 @@ pi -e ./src/index.ts --model openai/gpt-5.6-luna
 ## Requirements
 
 - Node `>= 22`
-- Pi `>=0.80.9 <0.81.0`
+- Pi `1.0.4` (validated; requires the Pi 1.x transcript API)
 - Auth/config for the model you want to use must already work in Pi
 - A supported OpenAI Responses model, e.g. `openai/gpt-5.6-sol` or `openai-codex/gpt-5.6-sol`
 
@@ -86,7 +94,9 @@ On compaction, the extension requests Responses compaction v2 through `/v1/respo
 - **An OpenAI-native opaque compaction artifact** for high-fidelity continuity on compatible future turns
 - **A portable Pi text summary** so non-OpenAI models, session exports, forking, and tree navigation keep working
 
-For direct `openai/*` models between compactions, the extension also:
+Fresh installs enable native compaction and keep Pi's built-in transport/storage behavior. No additional configuration file is required. Existing Pi authentication must already work.
+
+For direct `openai/*` models, opting into `usePreviousResponseId: true` additionally:
 
 - Patches requests with `store: true` and `context_management`
 - Uses `previous_response_id` for live continuation when safe
@@ -115,7 +125,7 @@ Remote compaction history is only replayed for compatible models. Cross-model tu
 
 Users should be aware:
 
-- For direct `openai/*` models, the extension sets `store: true` on requests, meaning OpenAI retains conversation data server-side
+- For direct `openai/*` models, optional `usePreviousResponseId: true` sets `store: true`, meaning OpenAI retains conversation data server-side. Set `usePreviousResponseId: false` to retain Pi's ordinary storage setting and built-in HTTP transport while keeping native compaction.
 - Conversation context is sent to OpenAI's Responses compaction protocol
 - Returned opaque compaction artifacts are stored in Pi's local session JSONL
 - These artifacts are provider-native and not human-readable
@@ -133,7 +143,7 @@ Config is read from:
   "includeAzure": false,
   "thresholdRatio": 0.7,
   "compactThreshold": 0,
-  "usePreviousResponseId": true,
+  "usePreviousResponseId": false,
   "notify": false
 }
 ```
@@ -173,6 +183,8 @@ Live end-to-end test (requires working Pi + OpenAI auth):
 npm run test:live
 ```
 
+The live harness invokes Pi through Node directly, including on Windows. It uses synthetic conversations, disables tools/context files/skills, and approves only its temporary workspace configuration. Set `PI_OPENAI_SERVER_COMPACTION_TEST_CLI` to an installed `dist/cli.js` to test that exact host. Optional `PI_OPENAI_SERVER_COMPACTION_TEST_CASE` selects `same-process`, `opaque`, `fork`, `resume`, `resume-switch`, or `migration`; `PI_OPENAI_SERVER_COMPACTION_TEST_KEEP=1` retains local evidence. `PI_OPENAI_SERVER_COMPACTION_TEST_ALT_MODEL` selects an account-supported alternate model. `PI_OPENAI_SERVER_COMPACTION_TEST_GLOBAL=1` tests global package auto-discovery instead of explicitly loading the development extension.
+
 Override the test model:
 
 ```bash
@@ -184,7 +196,7 @@ PI_OPENAI_SERVER_COMPACTION_TEST_MODEL=openai-codex/gpt-5.6-sol npm run test:liv
 - Pi's local JSONL/tree model remains authoritative
 - Opaque remote compaction artifacts are only reused for compatible OpenAI Responses turns
 - Switching to a different provider/model falls back to Pi's text-summary portability path
-- Compaction usage/cost is captured in details but not yet folded into Pi's `get_session_stats()` (requires Pi core changes)
+- Remote compaction usage/cost is captured in details; this extension does not yet aggregate it into Pi's `get_session_stats()`.
 
 ## Repo layout
 

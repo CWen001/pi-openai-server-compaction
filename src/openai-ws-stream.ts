@@ -9,10 +9,13 @@ import { randomUUID } from "node:crypto";
 import {
   calculateCost,
   createAssistantMessageEventStream,
+  getCurrentSystemPrompt,
+  getCurrentTools,
   type AssistantMessage,
   type AssistantMessageEvent,
   type AssistantMessageEventStream,
-  type Context,
+  type TranscriptContext,
+  type Tool,
   type Message,
   type Model,
   type SimpleStreamOptions,
@@ -25,6 +28,7 @@ import {
 import { streamSimpleOpenAIResponses } from "@earendil-works/pi-ai/compat";
 import { loadConfig } from "./config.ts";
 import {
+  applyRemoteHistoryPayloadPatch,
   isDirectOpenAIResponsesModel,
   modelKey,
   thinkingLevelToResponsesReasoning,
@@ -372,7 +376,7 @@ function parseThinkingSignature(value: unknown): Extract<InputItem, { type: "rea
   }
 }
 
-function convertTools(tools: Context["tools"]): FunctionToolDefinition[] {
+function convertTools(tools: Tool[]): FunctionToolDefinition[] {
   if (!tools || tools.length === 0) return [];
   return tools.map((tool) => ({
     type: "function",
@@ -531,7 +535,10 @@ function buildAssistantMessageFromResponse(
         name: toolName,
         arguments: (() => {
           try {
-            return JSON.parse(item.arguments) as Record<string, unknown>;
+            const parsed: unknown = JSON.parse(item.arguments);
+            return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+              ? parsed as ToolCall["arguments"]
+              : {};
           } catch {
             return {};
           }
@@ -579,15 +586,15 @@ function resolveWsWarmup(options: SimpleStreamOptions | undefined): boolean {
   return warmup === true;
 }
 
-function buildWsRequestKey(params: {
+export function buildWsRequestKey(params: {
   model: Model<any>;
-  context: Context;
+  context: TranscriptContext;
   tools: FunctionToolDefinition[];
   options: WsOptions | undefined;
 }): string {
   return JSON.stringify({
     model: params.model.id,
-    instructions: params.context.systemPrompt ?? undefined,
+    instructions: getCurrentSystemPrompt(params.context.messages) || undefined,
     tools: params.tools.length > 0 ? params.tools : undefined,
     temperature: params.options?.temperature,
     max_output_tokens: params.options?.maxTokens,
@@ -601,7 +608,7 @@ function buildWsRequestKey(params: {
 }
 
 export function selectInputItemsForContinuation(params: {
-  context: Context;
+  context: TranscriptContext;
   model: ReplayModelInfo;
   session: Pick<WsSession, "lastContextLength">;
   currentModelKey: string;
@@ -627,9 +634,9 @@ export function selectInputItemsForContinuation(params: {
   return buildFullInput(context, model);
 }
 
-function buildResponseCreatePayload(params: {
+export function buildResponseCreatePayload(params: {
   model: Model<any>;
-  context: Context;
+  context: TranscriptContext;
   inputItems: Array<InputItem | Record<string, unknown>>;
   tools: FunctionToolDefinition[];
   previousResponseId?: string | null;
@@ -641,7 +648,7 @@ function buildResponseCreatePayload(params: {
     model: params.model.id,
     store: false,
     input: params.inputItems,
-    instructions: params.context.systemPrompt ?? undefined,
+    instructions: getCurrentSystemPrompt(params.context.messages) || undefined,
     tools: params.tools.length > 0 ? params.tools : undefined,
     ...(params.previousResponseId ? { previous_response_id: params.previousResponseId } : {}),
     ...(params.options?.temperature !== undefined ? { temperature: params.options.temperature } : {}),
@@ -715,13 +722,13 @@ async function runWarmUp(params: {
   });
 }
 
-function buildFullInput(context: Context, model: ReplayModelInfo): InputItem[] {
+function buildFullInput(context: TranscriptContext, model: ReplayModelInfo): InputItem[] {
   return convertMessagesToInputItems(context.messages, model);
 }
 
 async function fallbackToHttp(
   model: ResponsesModel,
-  context: Context,
+  context: TranscriptContext,
   options: SimpleStreamOptions | undefined,
   eventStream: AssistantMessageEventStreamLike,
   signal?: AbortSignal,
@@ -737,9 +744,10 @@ async function fallbackToHttp(
       if (payload && typeof payload === "object") {
         const payloadObj = { ...(payload as Record<string, unknown>) };
         if (remoteCompactionState && remoteCompactionState.modelKey === modelKey(model)) {
-          payloadObj.input = normalizeResponseItemsForPrompt(remoteCompactionState.explicitHistory, model) as unknown[];
-          delete payloadObj.previous_response_id;
-          nextPayload = payloadObj;
+          nextPayload = applyRemoteHistoryPayloadPatch({
+            payload: payloadObj,
+            explicitHistory: normalizeResponseItemsForPrompt(remoteCompactionState.explicitHistory, model),
+          });
         } else if (
           typeof payloadObj.previous_response_id === "string" &&
           continuationState?.modelKey === modelKey(model) &&
@@ -765,7 +773,7 @@ async function fallbackToHttp(
 
 async function fallbackToHttpResponses(
   model: Model<any>,
-  context: Context,
+  context: TranscriptContext,
   options: SimpleStreamOptions | undefined,
   eventStream: AssistantMessageEventStreamLike,
   signal?: AbortSignal,
@@ -847,8 +855,8 @@ export function createOpenAIWebSocketStreamFn(
             await runWarmUp({
               manager: session.manager,
               modelId: model.id,
-              tools: convertTools(context.tools),
-              instructions: context.systemPrompt ?? undefined,
+              tools: convertTools(getCurrentTools(context.messages)),
+              instructions: getCurrentSystemPrompt(context.messages) || undefined,
               signal,
             });
           } catch {
@@ -859,7 +867,7 @@ export function createOpenAIWebSocketStreamFn(
         const remoteCompactionState = getRemoteCompactionState(sessionId);
         const continuationState = getContinuationState(sessionId);
         const typedOptions = options as WsOptions | undefined;
-        const functionTools = convertTools(context.tools);
+        const functionTools = convertTools(getCurrentTools(context.messages));
         const requestKey = buildWsRequestKey({
           model,
           context,

@@ -2,7 +2,19 @@
 
 This changelog intentionally starts at **0.1.0**.
 
-## Unreleased
+## 0.2.0 - 2026-10-07
+- adapt to Pi 1.0.4's normalized TranscriptContext and transcript-derived prompts/tools
+- retain system updates, additional tool declarations, and client tool-search metadata during remote replay
+- honor nullable provider headers and validate tool-call JSON object arguments
+- use host-provided peer packages and pin development checks to Pi 1.0.4
+- fix Windows live-test spawning and smoke-test peer discovery
+- extend opaque-only recall testing to Codex subscriptions and assert plaintext summaries omit the test identifier
+- honor Pi's active context projection when first taking over an already text-compacted session
+- validate six live scenarios against the installed Pi host with gpt-6-astra / gpt-6.1-sol
+- default `usePreviousResponseId` to false for fresh installs; keep built-in transport/storage while enabling native compaction
+- respect `usePreviousResponseId: false` without opting direct API requests into server-side storage
+
+## Previous upstream development
 - target Pi 0.80.9 and the `@earendil-works/*` package namespace
 - align compaction fallback, Responses payload normalization, Codex identity headers, and WebSocket behavior with Pi 0.80.9
 - replace the legacy `/responses/compact` call with Codex's current Responses compaction v2 protocol

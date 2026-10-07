@@ -14,7 +14,9 @@ function packagePathSegments(packageName) {
 
 function npmGlobalRoot() {
   try {
-    return execFileSync("npm", ["root", "-g"], {
+    const npmCli = process.env.npm_execpath;
+    return execFileSync(npmCli ? process.execPath : "npm", npmCli ? [npmCli, "root", "-g"] : ["root", "-g"], {
+      windowsHide: true,
       cwd: repoRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
@@ -29,7 +31,10 @@ function candidateRoots() {
   roots.add(localNodeModules);
 
   const globalRoot = npmGlobalRoot();
-  if (globalRoot) roots.add(globalRoot);
+  if (globalRoot) {
+    roots.add(globalRoot);
+    roots.add(join(globalRoot, "@earendil-works", "pi-coding-agent", "node_modules"));
+  }
 
   const voltaPiRoot = join(
     homedir(),
@@ -80,7 +85,7 @@ function ensureLocalPeerLink(packageName) {
       rmSync(localDir, { recursive: true, force: true });
     }
   }
-  symlinkSync(targetDir, localDir, "dir");
+  symlinkSync(targetDir, localDir, process.platform === "win32" ? "junction" : "dir");
 }
 
 for (const packageName of [

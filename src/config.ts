@@ -83,7 +83,7 @@ export function loadConfig(cwd: string): Required<ExtensionConfig> {
     usePreviousResponseId:
       toBoolean(process.env.PI_OPENAI_SERVER_COMPACTION_PREVIOUS_RESPONSE_ID) ??
       toBoolean(merged.usePreviousResponseId) ??
-      true,
+      false,
   };
 }
 

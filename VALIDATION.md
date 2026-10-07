@@ -1,6 +1,22 @@
 # Validation
 
-## Current Responses compaction v2 validation
+## Fork 0.2.0: Pi 1.0.4 validation (2026-10-07)
+
+Environment: Windows, Node 26.7.0, installed Pi 1.0.4 (also the npm latest version when checked). Primary model: `openai-codex/gpt-6-astra`; alternate: `openai-codex/gpt-6.1-sol`.
+
+- `npm test`: typecheck, original smoke suite, and Pi 1.x compatibility regressions passed.
+- Full live RPC suite against the installed host: all six cases passed (same-process/model switch, opaque-only recall, fork, resume, resume after model switch, and ordinary-text-to-native migration with restart).
+- Opaque-only recall generated a codename in an assistant reply and checked it was absent from the portable summary and visible replacement history before recovering it after compaction.
+- Native artifacts were returned and persisted with `implementation: responses_compaction_v2`; ordinary text fallback alone cannot pass the native assertions.
+- New offline checks cover transcript-derived prompts/tools, request-key invalidation after system updates, nullable case-insensitive headers, preservation of dynamic tool metadata, disabling optional server storage, and honoring existing compaction boundaries rather than resending the raw session log.
+- Global package auto-discovery (without an explicit `-e`) also passed opaque-only recall on both `gpt-6-astra` and `gpt-6.1-sol`. The tested global configuration keeps native compaction enabled and sets `usePreviousResponseId: false` to retain built-in transport/storage behavior.
+- A first model-switch run selected an obsolete catalog entry (`gpt-5.3-codex-spark`) rejected by the ChatGPT account. The harness now supports an explicit alternate and reports provider errors; the full passing run used `gpt-6.1-sol`.
+
+A clean-home subprocess regression also verifies that fresh installs enable native compaction and default `usePreviousResponseId` to false, independently of local user settings.
+
+These tests demonstrate integration and continuity, not comparative compaction quality. Direct API-key OpenAI, Azure, automatic context-overflow recovery, and the interactive TUI were not live-tested in this pass. Full raw test sessions remain local because they contain opaque provider artifacts.
+
+## Historical upstream Responses compaction v2 validation (Pi 0.80.9)
 
 The full live Pi RPC suite passes with both:
 
