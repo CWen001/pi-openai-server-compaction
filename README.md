@@ -4,9 +4,9 @@ Maintained fork: [CWen001/pi-openai-server-compaction](https://github.com/CWen00
 
 ## Pi 1.x compatibility
 
-Version 0.2.0 targets Pi **1.0.4**. The Codex subscription path has been live-tested on Windows with `openai-codex/gpt-6-astra`, including opaque-only recall, same-process continuation, fork, resume, a model round trip through `gpt-6.1-sol`, and migration from an existing ordinary text compaction. See [VALIDATION.md](VALIDATION.md). The direct API and Azure paths have not been live-revalidated on Pi 1.x; the older evidence below belongs to upstream's Pi 0.80.9 runs.
+Version 0.2.1 targets Pi **1.1.0**. The Codex subscription path has been live-tested on Windows with `openai-codex/gpt-6-astra`, including opaque-only recall, same-process continuation, fork, resume, a model round trip through `gpt-6.1-sol`, and migration from an existing ordinary text compaction. See [VALIDATION.md](VALIDATION.md). The direct API and Azure paths have not been live-revalidated on Pi 1.x; the older evidence below belongs to upstream's Pi 0.80.9 runs.
 
-This fork preserves Pi 1.x transcript system updates and dynamic tool declarations during native-history replay. First-time compaction uses Pi's effective context projection, honoring previous text compactions instead of resending the entire raw log. Host packages are peer dependencies; development checks are pinned to the validated Pi release.
+This fork preserves Pi 1.x transcript system updates and dynamic tool declarations during native-history replay. First-time compaction uses Pi's effective context projection, honoring previous text compactions instead of resending the entire raw log. Host packages are peer dependencies; development checks are pinned to the validated Pi release. The 1.1.0 revalidation required no runtime changes; regression checks now explicitly cover both replacement and omission context edits before the first native compaction.
 
 This is a Pi extension which adds **Codex-style remote compaction** for OpenAI models, giving you better continuity across compaction boundaries while preserving all of Pi's normal features.
 
@@ -83,7 +83,7 @@ pi -e ./src/index.ts --model openai/gpt-5.6-luna
 ## Requirements
 
 - Node `>= 22`
-- Pi `1.0.4` (validated; requires the Pi 1.x transcript API)
+- Pi `1.1.0` (validated; requires the Pi 1.x transcript API)
 - Auth/config for the model you want to use must already work in Pi
 - A supported OpenAI Responses model, e.g. `openai/gpt-5.6-sol` or `openai-codex/gpt-5.6-sol`
 

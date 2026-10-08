@@ -1,5 +1,17 @@
 # Validation
 
+## Fork 0.2.1: Pi 1.1.0 validation (2026-10-08)
+
+Environment: Windows, Node 26.7.0, installed Pi 1.1.0 (also the npm latest version when checked). Primary model: `openai-codex/gpt-6-astra`; alternate: `openai-codex/gpt-6.1-sol`.
+
+- Upstream remained at `8a3de2f`; the fork already contained the Pi 1.x compatibility and privacy-safe fallback diagnostic patches. This update pins development peers to 1.1.0 without changing runtime code or configuration defaults.
+- `npm test` passed against the 1.1.0 peers: typecheck, smoke, compatibility, and fallback suites. Compatibility checks additionally assert that replacement and omission context edits are respected when taking over a previously text-compacted session.
+- The complete live RPC suite passed against the exact installed 1.1.0 `dist/cli.js`: same-process/model round trip, opaque-only recall, fork, resume, resume after model switch, and ordinary-text-to-native migration with restart.
+- A separate inspection of the saved JSONL files verified a persisted `responses_compaction_v2` artifact with nonempty encrypted content in every scenario, zero fallback diagnostics, and zero provider-error messages. The migration case additionally recorded its intended ordinary text compaction.
+- Opaque-only recall recovered an assistant-generated codename absent from both the portable summary and visible replacement history. Raw sessions remain local because they contain opaque provider artifacts.
+
+This validates the Codex subscription path on Pi 1.1.0. Direct API-key OpenAI, Azure, automatic overflow recovery, and the interactive TUI were not live-tested in this pass. The earlier upstream performance benchmarks remain historical; this update makes no new comparative quality claim.
+
 ## Fork 0.2.0: Pi 1.0.4 validation (2026-10-07)
 
 Environment: Windows, Node 26.7.0, installed Pi 1.0.4 (also the npm latest version when checked). Primary model: `openai-codex/gpt-6-astra`; alternate: `openai-codex/gpt-6.1-sol`.

@@ -61,6 +61,14 @@ const projected = JSON.stringify(getBranchMessages(session.getBranch()));
 assert.doesNotMatch(projected, /OLD_RAW_HISTORY_MUST_STAY_COMPACTED/, "installing after text compaction must not resurrect the entire raw log");
 assert.match(projected, /Previously verified summary/);
 assert.match(projected, /Recent request/);
+session.appendContextEdit(retained, { content: "Edited recent request" });
+const omitted = session.appendMessage({ role: "user", content: "OMITTED_INPUT_MUST_NOT_REPLAY", timestamp: 2 });
+session.appendContextEdit(omitted, null);
+const editedProjection = JSON.stringify(getBranchMessages(session.getBranch()));
+assert.match(editedProjection, /Previously verified summary/);
+assert.match(editedProjection, /Edited recent request/);
+assert.doesNotMatch(editedProjection, /Recent request|OMITTED_INPUT_MUST_NOT_REPLAY|OLD_RAW_HISTORY_MUST_STAY_COMPACTED/,
+  "first native compaction must honor context edits as well as previous text compactions");
 // A clean home proves defaults without borrowing this machine\'s settings.
 const cleanHome = mkdtempSync(join(tmpdir(), "pi-compaction-defaults-"));
 try {

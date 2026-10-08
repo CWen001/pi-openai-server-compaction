@@ -2,6 +2,12 @@
 
 This changelog intentionally starts at **0.1.0**.
 
+## 0.2.1 - 2026-10-08
+- pin development checks to Pi 1.1.0; retain host-provided runtime peers and existing transport/storage defaults
+- add regression coverage for replacement and omission context edits when first taking over a text-compacted session
+- revalidate all six live RPC scenarios on the installed Pi 1.1.0 host with gpt-6-astra / gpt-6.1-sol
+- include privacy-safe fallback warnings and session diagnostics added since 0.2.0; keep raw provider error bodies out of logs
+
 ## 0.2.0 - 2026-10-07
 - adapt to Pi 1.0.4's normalized TranscriptContext and transcript-derived prompts/tools
 - retain system updates, additional tool declarations, and client tool-search metadata during remote replay
