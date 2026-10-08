@@ -50,7 +50,8 @@
   "scripts": {
     "smoke": "node --experimental-strip-types ./scripts/smoke.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && npm run smoke && node scripts/compat.mjs",
+    "test": "npm run typecheck && npm run smoke && node scripts/compat.mjs && npm run test:fallback",
+    "test:fallback": "node --experimental-test-module-mocks scripts/fallback.mjs",
     "test:live": "node --experimental-strip-types ./tests/live/openai-compaction-rpc-live.ts"
   },
   "dependencies": {

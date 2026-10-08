@@ -161,6 +161,27 @@ function maybeNotifyRequestFeatures(params: {
   params.ui.notify(`OpenAI compaction active for ${key} (${params.features.join(", ")})`, "info");
 }
 
+function describeRemoteFailure(reason: unknown): string {
+  // Provider error bodies can contain credentials or echoed conversation data.
+  // Record only known protocol errors, HTTP status and transport error codes.
+  if (reason instanceof Error) {
+    const status = /^OpenAI remote compaction v2 failed \((\d{3})\):/.exec(reason.message);
+    if (status) return `HTTP ${status[1]}`;
+    if (reason.message === "OpenAI remote compaction v2 stream ended before response.completed." ||
+        /^OpenAI remote compaction v2 expected exactly one compaction item, got \d+\.$/.test(reason.message)) {
+      return reason.message;
+    }
+    if (reason.message === "fetch failed") {
+      const code = isRecord(reason.cause) ? reason.cause.code : undefined;
+      const knownCodes = ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_SOCKET"];
+      return typeof code === "string" && knownCodes.includes(code) ? `Network request failed (${code})` : "Network request failed";
+    }
+    if (reason.name === "AbortError") return "Remote request aborted";
+    if (reason.name === "TimeoutError") return "Remote request timed out";
+  }
+  return "Remote request failed (provider details omitted for privacy)";
+}
+
 export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
   const notifiedModels = new Set<string>();
 
@@ -252,15 +273,17 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
       }),
     ]);
 
+    if (event.signal.aborted) return { cancel: true };
+
     if (remoteResult.status !== "fulfilled") {
-      if (localResult.status === "fulfilled") {
-        return { compaction: localResult.value };
-      }
-      if (!event.signal.aborted && ctx.hasUI) {
-        const message = remoteResult.reason instanceof Error ? remoteResult.reason.message : String(remoteResult.reason);
-        ctx.ui.notify(`OpenAI remote compaction failed; falling back to default compaction. ${message}`, "warning");
-      }
-      return undefined;
+      const fallback = localResult.status === "fulfilled" ? "text-summary" : "default-compaction";
+      const reason = describeRemoteFailure(remoteResult.reason);
+      pi.appendEntry("openai-compaction-fallback", { modelKey: modelKey(model), fallback, reason });
+      const action = localResult.status === "fulfilled" ? "using text summary" : "falling back to Pi's default compaction";
+      const warning = `OpenAI remote compaction failed; ${action} (no native artifact). ${reason}`;
+      if (ctx.hasUI) ctx.ui.notify(warning, "warning");
+      else console.error(warning);
+      return localResult.status === "fulfilled" ? { compaction: localResult.value } : undefined;
     }
 
     const remoteDetails = buildRemoteCompactionDetails(

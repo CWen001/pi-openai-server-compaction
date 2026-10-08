@@ -169,6 +169,8 @@ If something goes wrong:
 4. **Uninstall:** `pi remove pi-openai-server-compaction`
 5. **Inspect:** check your session JSONL for `compaction` entries with `details.remoteCompaction` to see if remote compaction was recorded
 
+If remote compaction fails, the extension warns before using the available text summary or handing off to Pi's default compactor. Failure warnings are independent of `notify` (which only controls activation notices). Headless runs write warnings to stderr, leaving protocol stdout untouched. A custom session entry with `customType: "openai-compaction-fallback"` records `modelKey`, the selected `fallback`, and a privacy-safe `reason`; HTTP status, known transport codes and known protocol failures are retained, but raw provider error bodies are not. The record describes a fallback decision, not proof that Pi's default compactor subsequently succeeded. User cancellation produces no fallback warning or diagnostic entry.
+
 ## Testing
 
 Smoke test (offline, verifies imports and key algorithms):
